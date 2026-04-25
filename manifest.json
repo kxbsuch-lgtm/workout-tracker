@@ -1,0 +1,8 @@
+{
+"name": "訓練日誌",
+"short_name": "Workout",
+"start_url": ".",
+"display": "standalone",
+"background_color": "#070710",
+"theme_color": "#070710"
+}
