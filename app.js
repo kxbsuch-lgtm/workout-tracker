@@ -1,3 +1,5 @@
+alert("app.js 有執行");
+
 (function(){
 
 function today(){
