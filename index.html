@@ -1,29 +1,756 @@
 <!DOCTYPE html>
-
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-
-<title>訓練日誌</title>
-
-<link rel="manifest" href="manifest.json"/>
-<link rel="stylesheet" href="style.css"/>
-
-<meta name="theme-color" content="#070710"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="訓練日誌"/>
+<title>訓練日誌</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{background:#070710;min-height:100vh;}
+input,textarea{color:#f0f0f0!important;-webkit-appearance:none;background:transparent;}
+input::placeholder,textarea::placeholder{color:#252535!important;}
+input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.4);}
+::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-thumb{background:#1c1c30;border-radius:2px;}
+.tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:#090918;border-top:1px solid #141428;display:flex;padding:8px 0 22px;z-index:100;}
+.tabn{flex:1;background:none;border:none;cursor:pointer;font-family:inherit;font-size:10px;display:flex;flex-direction:column;align-items:center;gap:3px;color:#2a2a4a;}
+.toast-el{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:10px 22px;border-radius:24px;font-size:13px;z-index:999;pointer-events:none;white-space:nowrap;animation:ta 2.2s ease forwards;}
+@keyframes ta{0%{opacity:0;transform:translateX(-50%) translateY(8px);}12%,82%{opacity:1;transform:translateX(-50%) translateY(0);}100%{opacity:0;}}
+details summary{list-style:none;cursor:pointer;}
+#root{font-family:'Noto Sans TC','PingFang TC',sans-serif;color:#f0f0f0;}
+</style>
 </head>
-
 <body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+(function(){
+const{useState,useEffect}=React;
+const MG=["胸","背","肩","二頭","三頭","核心","腿","臀"];
+const MC={"胸":"#ef4444","背":"#f97316","肩":"#eab308","二頭":"#22c55e","三頭":"#06b6d4","核心":"#8b5cf6","腿":"#ec4899","臀":"#f59e0b"};
+const BM=[
+  {key:"weight",label:"體重",unit:"kg",color:"#6366f1"},
+  {key:"bodyfat",label:"體脂",unit:"%",color:"#ef4444"},
+  {key:"muscle",label:"肌肉量",unit:"kg",color:"#22c55e"},
+  {key:"height",label:"身高",unit:"cm",color:"#f59e0b"}
+];
 
-<div id="app">載入中...</div>
+// ── Helpers ──
+function p2(n){return String(n).padStart(2,"0");}
+function todayStr(){const d=new Date();return d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate());}
 
-<script src="storage.js"></script>
+// ── Dual storage: IndexedDB + localStorage ──
+const DB="wt_db",ST="kv";
+let _db=null;
+function openDB(){
+  return new Promise(function(res){
+    if(_db){res(_db);return;}
+    var r=indexedDB.open(DB,1);
+    r.onupgradeneeded=function(e){e.target.result.createObjectStore(ST,{keyPath:"k"});};
+    r.onsuccess=function(e){_db=e.target.result;res(_db);};
+    r.onerror=function(){res(null);};
+  });
+}
+function idbSet(k,v){
+  openDB().then(function(db){
+    if(!db)return;
+    var tx=db.transaction(ST,"readwrite");
+    tx.objectStore(ST).put({k:k,v:JSON.stringify(v)});
+  }).catch(function(){});
+}
+function idbGet(k){
+  return openDB().then(function(db){
+    if(!db)return null;
+    return new Promise(function(res){
+      var tx=db.transaction(ST,"readonly");
+      var r=tx.objectStore(ST).get(k);
+      r.onsuccess=function(){res(r.result?JSON.parse(r.result.v):null);};
+      r.onerror=function(){res(null);};
+    });
+  }).catch(function(){return null;});
+}
+function lsGet(k){try{var v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}}
+function sSet(k,v){
+  try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}
+  idbSet(k,v);
+}
+function sGet(k){
+  var ls=lsGet(k);
+  if(ls!==null)return Promise.resolve(ls);
+  return idbGet(k);
+}
 
-<script src="app.js"></script>
+// ── Style constants ──
+var CARD={background:"#0d0d1c",border:"1px solid #161628",borderRadius:18,padding:16,marginBottom:12};
+var FIELD={background:"#08081a",border:"1px solid #1a1a30",borderRadius:10,padding:"9px 12px",fontSize:14,width:"100%",fontFamily:"inherit",outline:"none",color:"#f0f0f0"};
+var BTNP={background:"linear-gradient(135deg,#6366f1,#8b5cf6)",color:"#fff",border:"none",borderRadius:13,padding:13,fontSize:15,cursor:"pointer",width:"100%",fontFamily:"inherit",fontWeight:700};
+var BTNG={background:"transparent",color:"#666",border:"1px solid #1c1c30",borderRadius:10,padding:"9px 14px",fontSize:13,cursor:"pointer",fontFamily:"inherit"};
+function cs(sel,color){
+  return{padding:"5px 11px",borderRadius:20,fontSize:12,cursor:"pointer",
+    border:"1.5px solid "+(sel?color:"#1e1e30"),
+    background:sel?color+"33":"transparent",
+    color:sel?color:"#555",fontFamily:"inherit"};
+}
 
+// ── LineChart ──
+function LineChart(props){
+  var data=props.data,color=props.color;
+  var e=React.createElement;
+  if(!data||data.length<2){
+    return e("div",{style:{height:110,display:"flex",alignItems:"center",justifyContent:"center",color:"#252535",fontSize:12}},"需要至少 2 筆紀錄才能顯示曲線");
+  }
+  var W=300,H=110,pt=10,pb=20,pl=36,pr=8;
+  var vs=data.map(function(d){return d.v;});
+  var mn=Math.min.apply(null,vs),mx=Math.max.apply(null,vs),rng=mx-mn||1;
+  var iW=W-pl-pr,iH=H-pt-pb;
+  function tx(i){return pl+(i/(data.length-1))*iW;}
+  function ty(v){return pt+(1-(v-mn)/rng)*iH;}
+  var pts=data.map(function(d,i){return tx(i)+","+ty(d.v);}).join(" ");
+  var area="M"+tx(0)+","+ty(data[0].v)+" "+data.slice(1).map(function(d,i){return "L"+tx(i+1)+","+ty(d.v);}).join(" ")+" L"+tx(data.length-1)+","+(H-pb)+" L"+tx(0)+","+(H-pb)+" Z";
+  var gid="g"+color.slice(1);
+  return e("svg",{width:"100%",viewBox:"0 0 "+W+" "+H,style:{overflow:"visible",display:"block"}},
+    e("defs",null,e("linearGradient",{id:gid,x1:"0",y1:"0",x2:"0",y2:"1"},
+      e("stop",{offset:"0%",stopColor:color,stopOpacity:".2"}),
+      e("stop",{offset:"100%",stopColor:color,stopOpacity:"0"})
+    )),
+    [0,.5,1].map(function(t){
+      var y=pt+t*iH,v=(mx-t*rng).toFixed(1);
+      return e("g",{key:t},
+        e("line",{x1:pl,y1:y,x2:W-pr,y2:y,stroke:"#181828",strokeWidth:"1"}),
+        e("text",{x:pl-3,y:y+4,textAnchor:"end",fill:"#353555",fontSize:"9"},v)
+      );
+    }),
+    e("path",{d:area,fill:"url(#"+gid+")"}),
+    e("polyline",{points:pts,fill:"none",stroke:color,strokeWidth:"2",strokeLinejoin:"round",strokeLinecap:"round"}),
+    data.map(function(d,i){return e("circle",{key:i,cx:tx(i),cy:ty(d.v),r:"3",fill:color,stroke:"#070710",strokeWidth:"1.5"});})
+  );
+}
+
+// ── Calendar ──
+function Cal(props){
+  var sessions=props.sessions,plans=props.plans,sel=props.sel,onSel=props.onSel;
+  var yr_s=useState(new Date().getFullYear());
+  var mo_s=useState(new Date().getMonth());
+  var yr=yr_s[0],setYr=yr_s[1],mo=mo_s[0],setMo=mo_s[1];
+  var tod=todayStr();
+  var first=(new Date(yr,mo,1).getDay()+6)%7;
+  var dim=new Date(yr,mo+1,0).getDate();
+  var cells=[];
+  for(var i=0;i<first;i++)cells.push(0);
+  for(var d=1;d<=dim;d++)cells.push(d);
+  while(cells.length%7)cells.push(0);
+  function prev(){if(mo===0){setMo(11);setYr(function(y){return y-1;});}else setMo(function(m){return m-1;});}
+  function next(){if(mo===11){setMo(0);setYr(function(y){return y+1;});}else setMo(function(m){return m+1;});}
+  var e=React.createElement;
+  return e("div",null,
+    e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+      e("button",{onClick:prev,style:{background:"#0f0f1a",border:"1px solid #1a1a2e",borderRadius:8,color:"#aaa",width:32,height:32,cursor:"pointer",fontSize:16}},"‹"),
+      e("div",{style:{fontWeight:700,fontSize:15}},yr+" 年 "+(mo+1)+" 月"),
+      e("button",{onClick:next,style:{background:"#0f0f1a",border:"1px solid #1a1a2e",borderRadius:8,color:"#aaa",width:32,height:32,cursor:"pointer",fontSize:16}},"›")
+    ),
+    e("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}},
+      ["一","二","三","四","五","六","日"].map(function(d){return e("div",{key:d,style:{textAlign:"center",fontSize:10,color:"#3a3a5a",padding:"3px 0"}},d);})
+    ),
+    e("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}},
+      cells.map(function(d,i){
+        if(!d)return e("div",{key:i});
+        var k=yr+"-"+p2(mo+1)+"-"+p2(d);
+        var hasSess=!!(sessions[k]&&sessions[k].exercises&&sessions[k].exercises.length>0);
+        var mls=plans[k]||[];
+        var isToday=k===tod,isSel=k===sel;
+        return e("button",{key:i,onClick:function(){onSel(k);},style:{
+          background:isSel?"linear-gradient(135deg,#6366f1,#8b5cf6)":isToday?"#14143a":"#0d0d1c",
+          border:"1px solid "+(isSel?"#6366f1":isToday?"#6366f155":hasSess?"#252540":"#141420"),
+          borderRadius:10,padding:"5px 2px 4px",cursor:"pointer",
+          display:"flex",flexDirection:"column",alignItems:"center",gap:2,minHeight:42
+        }},
+          e("span",{style:{fontSize:13,fontWeight:isSel||isToday?700:400,color:isSel?"#fff":isToday?"#8b8cf8":"#ccc"}},d),
+          e("div",{style:{display:"flex",gap:2,flexWrap:"wrap",justifyContent:"center"}},
+            mls.slice(0,3).map(function(m){return e("div",{key:m,style:{width:4,height:4,borderRadius:"50%",background:MC[m]||"#6366f1"}});}),
+            hasSess?e("div",{style:{width:4,height:4,borderRadius:"50%",background:"rgba(255,255,255,0.4)"}}):null
+          )
+        );
+      })
+    ),
+    e("div",{style:{display:"flex",gap:12,marginTop:10,fontSize:10,color:"#2a2a3a"}},
+      e("span",null,"● 彩點＝計劃肌群"),
+      e("span",{style:{color:"rgba(255,255,255,0.25)"}},"● 白點＝有訓練紀錄")
+    )
+  );
+}
+
+// ── Main App ──
+function App(){
+  var tab_s=useState("log");
+  var tab=tab_s[0],setTab=tab_s[1];
+  var sess_s=useState({});
+  var sessions=sess_s[0],setSessions=sess_s[1];
+  var plan_s=useState({});
+  var plans=plan_s[0],setPlans=plan_s[1];
+  var body_s=useState({});
+  var body=body_s[0],setBody=body_s[1];
+  var ed_s=useState(todayStr());
+  var editDate=ed_s[0],setEditDate=ed_s[1];
+  var sa_s=useState(false);
+  var showAdd=sa_s[0],setShowAdd=sa_s[1];
+  var nx_s=useState({name:"",muscles:[],weight:"",reps:"",sets:"4",rest:"60"});
+  var newEx=nx_s[0],setNewEx=nx_s[1];
+  var cs2_s=useState(todayStr());
+  var calSel=cs2_s[0],setCalSel=cs2_s[1];
+  var bd_s=useState(todayStr());
+  var bDate=bd_s[0],setBDate=bd_s[1];
+  var bi_s=useState({weight:"",bodyfat:"",muscle:"",height:""});
+  var bInput=bi_s[0],setBInput=bi_s[1];
+  var bm_s=useState("week");
+  var bMode=bm_s[0],setBMode=bm_s[1];
+  var bmet_s=useState("weight");
+  var bMetric=bmet_s[0],setBMetric=bmet_s[1];
+  var toast_s=useState("");
+  var toast=toast_s[0],setToast=toast_s[1];
+
+  // Load data
+  useEffect(function(){
+    sGet("wt7_s").then(function(v){if(v)setSessions(v);});
+    sGet("wt7_p").then(function(v){if(v)setPlans(v);});
+    sGet("wt7_b").then(function(v){if(v)setBody(v);});
+  },[]);
+
+  // Sync body input
+  useEffect(function(){
+    var entry=body[bDate];
+    if(entry){setBInput({weight:entry.weight||"",bodyfat:entry.bodyfat||"",muscle:entry.muscle||"",height:entry.height||""});}
+    else{setBInput({weight:"",bodyfat:"",muscle:"",height:""});}
+  },[bDate,body]);
+
+  function showToast(msg){setToast(msg);setTimeout(function(){setToast("");},2200);}
+
+  // Export / Import
+  function exportData(){
+    var data={sessions:sessions,plans:plans,body:body,exported:new Date().toISOString()};
+    var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a");
+    a.href=url;a.download="訓練日誌備份_"+todayStr()+".json";
+    document.body.appendChild(a);a.click();
+    document.body.removeChild(a);URL.revokeObjectURL(url);
+    showToast("資料已匯出 ✓");
+  }
+  function importData(file){
+    if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      try{
+        var data=JSON.parse(ev.target.result);
+        if(data.sessions){setSessions(data.sessions);sSet("wt7_s",data.sessions);}
+        if(data.plans){setPlans(data.plans);sSet("wt7_p",data.plans);}
+        if(data.body){setBody(data.body);sSet("wt7_b",data.body);}
+        showToast("資料已匯入 ✓");
+      }catch(err){showToast("匯入失敗，請確認檔案格式");}
+    };
+    reader.readAsText(file);
+  }
+
+  // Derived
+  var curEx=(sessions[editDate]&&sessions[editDate].exercises)||[];
+  var curNote=(sessions[editDate]&&sessions[editDate].note)||"";
+  var calSess=sessions[calSel]||null;
+  var calPlan=plans[calSel]||[];
+  var today=todayStr();
+  var totalS=Object.keys(sessions).length;
+  var latestBArr=Object.entries(body).sort(function(a,b){return b[0].localeCompare(a[0]);});
+  var latestB=latestBArr.length>0?latestBArr[0][1]:{};
+  var mStats=MG.reduce(function(acc,m){
+    acc[m]=0;
+    Object.values(sessions).forEach(function(s){
+      (s.exercises||[]).forEach(function(ex){
+        (ex.muscles||[]).forEach(function(mg){if(mg===m)acc[m]+=ex.sets.length;});
+      });
+    });
+    return acc;
+  },{});
+  var maxS=Math.max.apply(null,Object.values(mStats).concat([1]));
+
+  function sessUpdate(fn){
+    setSessions(function(prev){
+      var next=fn(prev);
+      sSet("wt7_s",next);
+      return next;
+    });
+  }
+  function addExercise(){
+    if(!newEx.name.trim())return;
+    var n=Math.max(1,parseInt(newEx.sets)||1);
+    var sets=[];for(var i=0;i<n;i++)sets.push({weight:newEx.weight,reps:newEx.reps,rest:newEx.rest});
+    var ex={id:Date.now(),name:newEx.name.trim(),muscles:newEx.muscles.slice(),sets:sets};
+    sessUpdate(function(prev){
+      var cur=prev[editDate]||{exercises:[],note:""};
+      var obj={};Object.assign(obj,prev);
+      obj[editDate]={exercises:cur.exercises.concat([ex]),note:cur.note};
+      return obj;
+    });
+    showToast("動作已新增 ✓");
+    setNewEx({name:"",muscles:[],weight:"",reps:"",sets:"4",rest:"60"});
+    setShowAdd(false);
+  }
+  function bulkSet(xi,field,val){
+    sessUpdate(function(prev){
+      var cur=prev[editDate]||{exercises:[],note:""};
+      var exs=cur.exercises.map(function(ex,i){
+        if(i!==xi)return ex;
+        return Object.assign({},ex,{sets:ex.sets.map(function(s){var ns={};Object.assign(ns,s);ns[field]=val;return ns;})});
+      });
+      var obj={};Object.assign(obj,prev);obj[editDate]={exercises:exs,note:cur.note};return obj;
+    });
+  }
+  function changeSetCount(xi,delta){
+    sessUpdate(function(prev){
+      var cur=prev[editDate]||{exercises:[],note:""};
+      var exs=cur.exercises.map(function(ex,i){
+        if(i!==xi)return ex;
+        var sets=ex.sets.slice();
+        if(delta>0){sets.push(Object.assign({},sets[sets.length-1]));}
+        else if(sets.length>1){sets=sets.slice(0,-1);}
+        return Object.assign({},ex,{sets:sets});
+      });
+      var obj={};Object.assign(obj,prev);obj[editDate]={exercises:exs,note:cur.note};return obj;
+    });
+  }
+  function removeExercise(xi){
+    sessUpdate(function(prev){
+      var cur=prev[editDate]||{exercises:[],note:""};
+      var obj={};Object.assign(obj,prev);
+      obj[editDate]={exercises:cur.exercises.filter(function(_,i){return i!==xi;}),note:cur.note};
+      return obj;
+    });
+    showToast("已刪除");
+  }
+  function moveExercise(xi,dir){
+    sessUpdate(function(prev){
+      var cur=prev[editDate]||{exercises:[],note:""};
+      var exs=cur.exercises.slice();
+      var t=xi+dir;
+      if(t<0||t>=exs.length)return prev;
+      var tmp=exs[xi];exs[xi]=exs[t];exs[t]=tmp;
+      var obj={};Object.assign(obj,prev);obj[editDate]={exercises:exs,note:cur.note};return obj;
+    });
+  }
+  function updateIndivSet(xi,si,field,val){
+    sessUpdate(function(prev){
+      var cur=prev[editDate]||{exercises:[],note:""};
+      var exs=cur.exercises.map(function(ex,i){
+        if(i!==xi)return ex;
+        var sets=ex.sets.map(function(s,j){if(j!==si)return s;var ns={};Object.assign(ns,s);ns[field]=val;return ns;});
+        return Object.assign({},ex,{sets:sets});
+      });
+      var obj={};Object.assign(obj,prev);obj[editDate]={exercises:exs,note:cur.note};return obj;
+    });
+  }
+  function updateNote(n){
+    sessUpdate(function(prev){
+      var cur=prev[editDate]||{exercises:[],note:""};
+      var obj={};Object.assign(obj,prev);obj[editDate]={exercises:cur.exercises,note:n};return obj;
+    });
+  }
+  function togglePlan(dateKey,muscle){
+    setPlans(function(prev){
+      var cur=prev[dateKey]||[];
+      var next={};Object.assign(next,prev);
+      next[dateKey]=cur.includes(muscle)?cur.filter(function(m){return m!==muscle;}):cur.concat([muscle]);
+      sSet("wt7_p",next);return next;
+    });
+    showToast("計劃已更新 ✓");
+  }
+  function saveBody(){
+    var entry={};
+    BM.forEach(function(m){if(bInput[m.key]!=="")entry[m.key]=bInput[m.key];});
+    if(!Object.keys(entry).length){showToast("請填入至少一項數據");return;}
+    setBody(function(prev){var next={};Object.assign(next,prev);next[bDate]=entry;sSet("wt7_b",next);return next;});
+    showToast("身體數據已儲存 ✓");
+  }
+  function chartData(key){
+    var now=new Date(),cut=new Date(now.getTime());
+    if(bMode==="week")cut.setDate(now.getDate()-28);else cut.setMonth(now.getMonth()-12);
+    return Object.entries(body)
+      .filter(function(kv){return kv[1][key]!=null&&kv[1][key]!==""&&new Date(kv[0])>=cut;})
+      .sort(function(a,b){return a[0].localeCompare(b[0]);})
+      .map(function(kv){return{lbl:bMode==="week"?kv[0].slice(5):kv[0].slice(0,7),v:parseFloat(kv[1][key])};});
+  }
+  function calcVol(exercises){
+    return(exercises||[]).reduce(function(sum,ex){
+      return sum+ex.sets.reduce(function(s2,s){return s2+(parseFloat(s.weight)||0)*(parseFloat(s.reps)||0);},0);
+    },0);
+  }
+
+  var e=React.createElement;
+
+  // ── LOG TAB ──
+  function LogTab(){
+    var totalVol=calcVol(curEx);
+    var totalSets=curEx.reduce(function(s,ex){return s+ex.sets.length;},0);
+    return e("div",null,
+      // Date selector
+      e("div",{style:Object.assign({},CARD,{display:"flex",gap:12,alignItems:"center",padding:"12px 16px"})},
+        e("span",{style:{fontSize:20}},"📅"),
+        e("div",{style:{flex:1}},
+          e("div",{style:{fontSize:10,color:"#333",marginBottom:3}},"訓練日期"),
+          e("input",{type:"date",value:editDate,onChange:function(ev){setEditDate(ev.target.value);},style:Object.assign({},FIELD,{padding:"5px 10px",width:"auto"})})
+        ),
+        editDate===today?e("span",{style:{fontSize:10,background:"#14143a",color:"#6366f1",padding:"3px 9px",borderRadius:6}},"今天"):null
+      ),
+      // Exercise cards
+      curEx.map(function(ex,xi){
+        var s0=ex.sets[0]||{};
+        var exVol=ex.sets.reduce(function(s,st){return s+(parseFloat(st.weight)||0)*(parseFloat(st.reps)||0);},0);
+        return e("div",{key:ex.id||xi,style:CARD},
+          e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}},
+            e("div",{style:{flex:1,minWidth:0}},
+              e("div",{style:{fontWeight:700,fontSize:15,marginBottom:5}},ex.name),
+              e("div",{style:{display:"flex",gap:4,flexWrap:"wrap"}},
+                (ex.muscles||[]).map(function(m){return e("span",{key:m,style:{background:MC[m]+"22",color:MC[m],padding:"2px 8px",borderRadius:10,fontSize:10,border:"1px solid "+MC[m]+"33"}},m);})
+              )
+            ),
+            e("div",{style:{display:"flex",gap:4,flexShrink:0,marginLeft:8}},
+              e("div",{style:{display:"flex",flexDirection:"column",gap:2}},
+                e("button",{disabled:xi===0,onClick:function(){moveExercise(xi,-1);},style:{background:"#111128",border:"1px solid #1c1c30",color:xi===0?"#2a2a3a":"#7c7ccc",borderRadius:6,width:24,height:20,cursor:xi===0?"default":"pointer",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}},"▲"),
+                e("button",{disabled:xi===curEx.length-1,onClick:function(){moveExercise(xi,1);},style:{background:"#111128",border:"1px solid #1c1c30",color:xi===curEx.length-1?"#2a2a3a":"#7c7ccc",borderRadius:6,width:24,height:20,cursor:xi===curEx.length-1?"default":"pointer",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}},"▼")
+              ),
+              e("button",{onClick:function(){removeExercise(xi);},style:{background:"#14141e",border:"1px solid #1e1e2e",color:"#555",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:13,alignSelf:"flex-start"}},"✕")
+            )
+          ),
+          e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 76px 1fr",gap:6,marginBottom:5}},
+            ["重量(kg)","次數","組數","組間(s)"].map(function(h){return e("div",{key:h,style:{fontSize:10,color:"#333",textAlign:"center"}},h);})
+          ),
+          e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 76px 1fr",gap:6,alignItems:"center"}},
+            e("input",{type:"number",inputMode:"decimal",placeholder:"0",value:s0.weight||"",onChange:function(ev){bulkSet(xi,"weight",ev.target.value);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})}),
+            e("input",{type:"number",inputMode:"numeric",placeholder:"0",value:s0.reps||"",onChange:function(ev){bulkSet(xi,"reps",ev.target.value);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})}),
+            e("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",gap:4}},
+              e("button",{onClick:function(){changeSetCount(xi,-1);},style:{background:"#111128",border:"1px solid #1c1c30",color:"#aaa",borderRadius:7,width:24,height:30,cursor:"pointer",fontSize:15}},"−"),
+              e("span",{style:{fontFamily:"'Space Mono',monospace",fontSize:15,fontWeight:700,color:"#8b8cf8",minWidth:14,textAlign:"center"}},ex.sets.length),
+              e("button",{onClick:function(){changeSetCount(xi,1);},style:{background:"#111128",border:"1px solid #1c1c30",color:"#aaa",borderRadius:7,width:24,height:30,cursor:"pointer",fontSize:15}},"＋")
+            ),
+            e("input",{type:"number",inputMode:"numeric",placeholder:"60",value:s0.rest||"",onChange:function(ev){bulkSet(xi,"rest",ev.target.value);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})})
+          ),
+          exVol>0?e("div",{style:{marginTop:8,display:"flex",justifyContent:"flex-end"}},e("span",{style:{fontSize:11,color:"#6366f1",background:"#6366f115",border:"1px solid #6366f133",borderRadius:8,padding:"3px 10px"}},"總量 "+exVol.toLocaleString()+" kg")):null,
+          ex.sets.length>1?e("details",{style:{marginTop:6}},
+            e("summary",{style:{fontSize:11,color:"#3a3a5a",padding:"4px 0"}},"▸ 各組獨立設定（"+ex.sets.length+" 組）"),
+            e("div",{style:{marginTop:8}},
+              ex.sets.map(function(s,si){
+                return e("div",{key:si,style:{display:"grid",gridTemplateColumns:"18px 1fr 1fr 1fr",gap:5,marginBottom:5,alignItems:"center"}},
+                  e("span",{style:{fontSize:10,color:"#444",textAlign:"center"}},"S"+(si+1)),
+                  e("input",{type:"number",inputMode:"decimal",placeholder:"kg",value:s.weight||"",onChange:function(ev){updateIndivSet(xi,si,"weight",ev.target.value);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
+                  e("input",{type:"number",inputMode:"numeric",placeholder:"次",value:s.reps||"",onChange:function(ev){updateIndivSet(xi,si,"reps",ev.target.value);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
+                  e("input",{type:"number",inputMode:"numeric",placeholder:"秒",value:s.rest||"",onChange:function(ev){updateIndivSet(xi,si,"rest",ev.target.value);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})})
+                );
+              })
+            )
+          ):null
+        );
+      }),
+      // Session total
+      curEx.length>0&&totalVol>0?e("div",{style:Object.assign({},CARD,{background:"#0d0d20",border:"1px solid #6366f133",padding:"13px 16px"})},
+        e("div",{style:{fontSize:10,color:"#555",letterSpacing:1,marginBottom:8}},"本次訓練總量"),
+        e("div",{style:{display:"flex"}},
+          e("div",{style:{flex:1,textAlign:"center"}},e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:"#6366f1"}},totalVol.toLocaleString()),e("div",{style:{fontSize:10,color:"#555",marginTop:3}},"總量 (kg)")),
+          e("div",{style:{width:1,background:"#1e1e35",margin:"0 4px"}}),
+          e("div",{style:{flex:1,textAlign:"center"}},e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:"#8b5cf6"}},curEx.length),e("div",{style:{fontSize:10,color:"#555",marginTop:3}},"動作數")),
+          e("div",{style:{width:1,background:"#1e1e35",margin:"0 4px"}}),
+          e("div",{style:{flex:1,textAlign:"center"}},e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:"#06b6d4"}},totalSets),e("div",{style:{fontSize:10,color:"#555",marginTop:3}},"總組數"))
+        )
+      ):null,
+      // Add exercise
+      showAdd?e("div",{style:Object.assign({},CARD,{border:"1px solid #6366f133"})},
+        e("div",{style:{fontWeight:700,fontSize:14,color:"#8b8cf8",marginBottom:14}},"＋ 新增訓練動作"),
+        e("input",{placeholder:"動作名稱（例：臥推、深蹲）",value:newEx.name,onChange:function(ev){setNewEx(function(p){return Object.assign({},p,{name:ev.target.value});});},onKeyDown:function(ev){if(ev.key==="Enter")addExercise();},style:Object.assign({},FIELD,{marginBottom:10}),autoFocus:true}),
+        e("div",{style:{fontSize:11,color:"#444",marginBottom:7}},"目標肌群"),
+        e("div",{style:{display:"flex",flexWrap:"wrap",gap:7,marginBottom:14}},
+          MG.map(function(m){
+            var sel=newEx.muscles.includes(m);
+            return e("button",{key:m,style:cs(sel,MC[m]),onClick:function(){setNewEx(function(p){return Object.assign({},p,{muscles:sel?p.muscles.filter(function(x){return x!==m;}):p.muscles.concat([m])});});}},m);
+          })
+        ),
+        e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:14}},
+          [["重量","weight","decimal"],["次數","reps","numeric"],["組數","sets","numeric"],["組間s","rest","numeric"]].map(function(arr){
+            var lb=arr[0],fk=arr[1],mode=arr[2];
+            return e("div",{key:fk},
+              e("div",{style:{fontSize:10,color:"#444",marginBottom:4,textAlign:"center"}},lb),
+              e("input",{type:"number",inputMode:mode,placeholder:fk==="sets"?"4":fk==="rest"?"60":"0",value:newEx[fk],onChange:function(ev){var v=ev.target.value;setNewEx(function(p){var n={};Object.assign(n,p);n[fk]=v;return n;});},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})})
+            );
+          })
+        ),
+        e("div",{style:{display:"flex",gap:8}},
+          e("button",{style:Object.assign({},BTNG,{flex:1}),onClick:function(){setShowAdd(false);setNewEx({name:"",muscles:[],weight:"",reps:"",sets:"4",rest:"60"});}},"取消"),
+          e("button",{style:Object.assign({},BTNP,{flex:2}),onClick:addExercise},"確認新增")
+        )
+      ):e("button",{style:Object.assign({},BTNG,{width:"100%",padding:13,fontSize:14,marginBottom:12,borderStyle:"dashed",borderColor:"#1c1c30"}),onClick:function(){setShowAdd(true);}},"＋ 新增訓練動作"),
+      e("div",{style:CARD},
+        e("div",{style:{fontSize:11,color:"#444",marginBottom:8}},"💭 備註 / 訓練感受"),
+        e("textarea",{rows:3,placeholder:"記錄今天的感受、突破或心得...",value:curNote,onChange:function(ev){updateNote(ev.target.value);},style:Object.assign({},FIELD,{resize:"none",lineHeight:1.7})})
+      ),
+      e("button",{style:BTNP,onClick:function(){sSet("wt7_s",sessions);showToast("訓練已儲存 ✓");}},"💾 儲存本次訓練")
+    );
+  }
+
+  // ── CALENDAR TAB ──
+  function CalTab(){
+    var vol=calcVol(calSess&&calSess.exercises);
+    var sets=(calSess&&calSess.exercises||[]).reduce(function(s,ex){return s+ex.sets.length;},0);
+    return e("div",null,
+      e("div",{style:CARD},e(Cal,{sessions:sessions,plans:plans,sel:calSel,onSel:setCalSel})),
+      e("div",{style:Object.assign({},CARD,{border:"1px solid #6366f133"})},
+        e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+          e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:13,color:"#6366f1",fontWeight:700}},calSel),
+          calSel===today?e("span",{style:{fontSize:10,background:"#14143a",color:"#6366f1",padding:"3px 9px",borderRadius:6}},"今天"):null
+        ),
+        e("div",{style:{fontSize:11,color:"#444",marginBottom:7}},"📋 計劃肌群（點擊切換）"),
+        e("div",{style:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}},
+          MG.map(function(m){return e("button",{key:m,style:cs(calPlan.includes(m),MC[m]),onClick:function(){togglePlan(calSel,m);}},m);})
+        ),
+        calSess&&calSess.exercises&&calSess.exercises.length>0?e("div",null,
+          e("div",{style:{fontSize:11,color:"#444",marginBottom:8}},"🏋️ 訓練紀錄"),
+          vol>0?e("div",{style:{display:"flex",background:"#0d0d20",border:"1px solid #6366f133",borderRadius:12,padding:"10px 0",marginBottom:12}},
+            e("div",{style:{flex:1,textAlign:"center"}},e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:17,fontWeight:700,color:"#6366f1"}},vol.toLocaleString()),e("div",{style:{fontSize:10,color:"#555",marginTop:2}},"總量 (kg)")),
+            e("div",{style:{width:1,background:"#1e1e35"}}),
+            e("div",{style:{flex:1,textAlign:"center"}},e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:17,fontWeight:700,color:"#8b5cf6"}},(calSess.exercises||[]).length),e("div",{style:{fontSize:10,color:"#555",marginTop:2}},"動作數")),
+            e("div",{style:{width:1,background:"#1e1e35"}}),
+            e("div",{style:{flex:1,textAlign:"center"}},e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:17,fontWeight:700,color:"#06b6d4"}},sets),e("div",{style:{fontSize:10,color:"#555",marginTop:2}},"總組數"))
+          ):null,
+          calSess.exercises.map(function(ex,i){
+            return e("div",{key:i,style:{background:"#09091a",borderRadius:12,padding:"10px 13px",marginBottom:8}},
+              e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:5}},
+                e("span",{style:{fontWeight:600,fontSize:14}},ex.name),
+                e("span",{style:{fontSize:11,color:"#444"}},ex.sets.length+" 組")
+              ),
+              e("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}},
+                (ex.muscles||[]).map(function(m){return e("span",{key:m,style:{background:MC[m]+"22",color:MC[m],padding:"1px 7px",borderRadius:8,fontSize:10,border:"1px solid "+MC[m]+"33"}},m);})
+              ),
+              e("div",{style:{fontSize:12,color:"#555",lineHeight:1.9}},
+                ex.sets.map(function(s,si){
+                  return e("span",{key:si,style:{marginRight:10}},
+                    e("span",{style:{color:"#6366f1"}},"S"+(si+1)),
+                    s.weight?" "+s.weight+"kg":"",
+                    s.reps?" ×"+s.reps:"",
+                    s.rest?" / "+s.rest+"s":""
+                  );
+                })
+              )
+            );
+          }),
+          calSess.note?e("div",{style:{background:"#09091a",borderRadius:10,padding:"9px 13px",fontSize:13,color:"#777",fontStyle:"italic",marginTop:4}},"💭 "+calSess.note):null,
+          e("button",{style:Object.assign({},BTNG,{width:"100%",marginTop:10}),onClick:function(){setEditDate(calSel);setTab("log");}},"✏️ 編輯此日訓練")
+        ):e("div",{style:{textAlign:"center",padding:"14px 0"}},
+          e("div",{style:{fontSize:13,color:"#1e1e2e",marginBottom:10}},"此日無訓練紀錄"),
+          e("button",{style:BTNG,onClick:function(){setEditDate(calSel);setTab("log");}},"＋ 前往新增")
+        )
+      )
+    );
+  }
+
+  // ── STATS TAB ──
+  function StatsTab(){
+    var totalSets=Object.values(sessions).reduce(function(a,s){return a+(s.exercises||[]).reduce(function(b,ex){return b+ex.sets.length;},0);},0);
+    return e("div",null,
+      e("div",{style:{fontSize:10,color:"#252535",letterSpacing:2,marginBottom:14}},"肌群刺激統計（累計組數）"),
+      MG.map(function(m){
+        var v=mStats[m]||0,pct=v/maxS*100;
+        return e("div",{key:m,style:{marginBottom:12}},
+          e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
+            e("span",{style:{fontSize:14,fontWeight:500}},m),
+            e("span",{style:{fontFamily:"'Space Mono',monospace",fontSize:12,color:MC[m]}},v+" 組")
+          ),
+          e("div",{style:{background:"#0d0d1c",borderRadius:8,height:9,overflow:"hidden"}},
+            e("div",{style:{width:pct+"%",height:9,background:MC[m],borderRadius:8,transition:"width .5s"}})
+          )
+        );
+      }),
+      e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:20}},
+        [[totalS,"總訓練次數","#6366f1"],[totalSets,"總訓練組數","#22c55e"]].map(function(arr){
+          return e("div",{key:arr[1],style:Object.assign({},CARD,{textAlign:"center"})},
+            e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:30,color:arr[2],fontWeight:700}},arr[0]),
+            e("div",{style:{fontSize:11,color:"#333",marginTop:4}},arr[1])
+          );
+        })
+      ),
+      e("div",{style:{marginTop:16}},
+        e("div",{style:{fontSize:10,color:"#252535",letterSpacing:2,marginBottom:10}},"RECENT SESSIONS"),
+        Object.entries(sessions).sort(function(a,b){return b[0].localeCompare(a[0]);}).slice(0,6).map(function(kv){
+          var date=kv[0],sess=kv[1];
+          return e("div",{key:date,style:Object.assign({},CARD,{padding:"11px 15px",cursor:"pointer"}),onClick:function(){setEditDate(date);setTab("log");}},
+            e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+              e("span",{style:{fontFamily:"'Space Mono',monospace",fontSize:12,color:"#6366f1"}},date),
+              e("span",{style:{fontSize:11,color:"#333"}},(sess.exercises||[]).length+"動 · "+(sess.exercises||[]).reduce(function(a,ex){return a+ex.sets.length;},0)+"組")
+            ),
+            sess.note?e("div",{style:{fontSize:11,color:"#2a2a4a",marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},sess.note):null
+          );
+        })
+      )
+    );
+  }
+
+  // ── BODY TAB ──
+  function BodyTab(){
+    var met=BM.find(function(m){return m.key===bMetric;});
+    var data=chartData(bMetric);
+    return e("div",null,
+      e("div",{style:Object.assign({},CARD,{border:"1px solid #6366f133"})},
+        e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+          e("div",{style:{fontWeight:700,fontSize:14}},"📏 新增身體數據"),
+          e("input",{type:"date",value:bDate,onChange:function(ev){setBDate(ev.target.value);},style:Object.assign({},FIELD,{padding:"5px 10px",width:"auto",fontSize:12})})
+        ),
+        e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}},
+          BM.map(function(m){
+            return e("div",{key:m.key},
+              e("div",{style:{fontSize:11,color:m.color,marginBottom:5,fontWeight:600}},m.label+" ("+m.unit+")"),
+              e("input",{type:"number",inputMode:"decimal",placeholder:"輸入"+m.label,value:bInput[m.key]||"",onChange:function(ev){var v=ev.target.value;setBInput(function(p){var n={};Object.assign(n,p);n[m.key]=v;return n;});},style:FIELD})
+            );
+          })
+        ),
+        e("button",{style:BTNP,onClick:saveBody},"💾 儲存身體數據")
+      ),
+      Object.keys(latestB).length>0?e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}},
+        BM.filter(function(m){return latestB[m.key]!=null;}).map(function(m){
+          return e("div",{key:m.key,style:Object.assign({},CARD,{textAlign:"center",padding:"14px 12px",border:"1px solid "+m.color+"1a"})},
+            e("div",{style:{fontSize:10,color:"#333",marginBottom:3}},"最新"+m.label),
+            e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:22,color:m.color,fontWeight:700}},latestB[m.key],e("span",{style:{fontSize:11,color:"#444"}},m.unit))
+          );
+        })
+      ):null,
+      e("div",{style:CARD},
+        e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+          e("div",{style:{fontWeight:700,fontSize:14}},"📈 趨勢曲線"),
+          e("div",{style:{display:"flex",background:"#08081a",borderRadius:10,padding:3,gap:2}},
+            [["week","近4週"],["month","近12月"]].map(function(arr){
+              return e("button",{key:arr[0],onClick:function(){setBMode(arr[0]);},style:{flex:1,padding:"5px 10px",borderRadius:9,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,background:bMode===arr[0]?"#6366f1":"transparent",color:bMode===arr[0]?"#fff":"#555"}},arr[1]);
+            })
+          )
+        ),
+        e("div",{style:{display:"flex",gap:7,marginBottom:14,overflowX:"auto",paddingBottom:2}},
+          BM.map(function(m){return e("button",{key:m.key,onClick:function(){setBMetric(m.key);},style:cs(bMetric===m.key,m.color)},m.label);})
+        ),
+        e("div",null,
+          e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+            e("span",{style:{fontSize:12,color:met.color,fontWeight:600}},met.label+" ("+met.unit+")"),
+            data.length>=2?e("span",{style:{fontSize:11,color:"#444"}},data[0].v+" → ",e("span",{style:{color:data[data.length-1].v>data[0].v?"#22c55e":"#ef4444"}},data[data.length-1].v+met.unit)):null
+          ),
+          e(LineChart,{data:data,color:met.color})
+        )
+      ),
+      e("div",null,
+        e("div",{style:{fontSize:10,color:"#252535",letterSpacing:2,marginBottom:10}},"HISTORY"),
+        Object.entries(body).sort(function(a,b){return b[0].localeCompare(a[0]);}).slice(0,12).map(function(kv){
+          var date=kv[0],entry=kv[1];
+          return e("div",{key:date,style:Object.assign({},CARD,{padding:"11px 15px",cursor:"pointer"}),onClick:function(){setBDate(date);}},
+            e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:11,color:"#6366f1",marginBottom:6}},date),
+            e("div",{style:{display:"flex",gap:12,flexWrap:"wrap"}},
+              BM.filter(function(m){return entry[m.key]!=null;}).map(function(m){
+                return e("div",{key:m.key,style:{fontSize:12}},
+                  e("span",{style:{color:"#333"}},m.label+" "),
+                  e("span",{style:{color:m.color,fontWeight:600}},entry[m.key]+m.unit)
+                );
+              })
+            )
+          );
+        })
+      )
+    );
+  }
+
+  // ── SETTINGS TAB ──
+  function SettingsTab(){
+    var totalSets=Object.values(sessions).reduce(function(a,s){return a+(s.exercises||[]).reduce(function(b,ex){return b+ex.sets.length;},0);},0);
+    return e("div",null,
+      e("div",{style:Object.assign({},CARD,{border:"1px solid #22c55e33"})},
+        e("div",{style:{fontWeight:700,fontSize:14,color:"#22c55e",marginBottom:4}},"📦 資料備份與還原"),
+        e("div",{style:{fontSize:12,color:"#555",marginBottom:14,lineHeight:1.7}},"建議定期匯出備份。將 JSON 檔存在雲端，換裝置後可完整還原。"),
+        e("button",{style:Object.assign({},BTNP,{background:"linear-gradient(135deg,#22c55e,#16a34a)",marginBottom:10}),onClick:exportData},"⬇ 匯出所有資料（JSON）"),
+        e("div",{style:{fontSize:11,color:"#555",marginBottom:8}},"匯入備份檔案："),
+        e("label",{style:Object.assign({},BTNG,{display:"block",textAlign:"center",cursor:"pointer",padding:12})},
+          "⬆ 選擇備份檔案匯入",
+          e("input",{type:"file",accept:".json",onChange:function(ev){importData(ev.target.files[0]);},style:{display:"none"}})
+        )
+      ),
+      e("div",{style:CARD},
+        e("div",{style:{fontWeight:700,fontSize:14,marginBottom:12}},"📊 資料統計"),
+        e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+          [[Object.keys(sessions).length,"訓練天數","#6366f1"],[Object.keys(body).length,"身體紀錄","#22c55e"],[totalSets,"總訓練組數","#f59e0b"]].map(function(arr){
+            return e("div",{key:arr[1],style:{background:"#09091a",borderRadius:12,padding:"12px 8px",textAlign:"center"}},
+              e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:22,color:arr[2],fontWeight:700}},arr[0]),
+              e("div",{style:{fontSize:10,color:"#555",marginTop:4}},arr[1])
+            );
+          })
+        )
+      ),
+      e("div",{style:Object.assign({},CARD,{border:"1px solid #ef444433"})},
+        e("div",{style:{fontWeight:700,fontSize:14,color:"#ef4444",marginBottom:8}},"🗑 清除所有資料"),
+        e("div",{style:{fontSize:12,color:"#555",marginBottom:12}},"此操作無法復原，請先匯出備份。"),
+        e("button",{style:Object.assign({},BTNG,{width:"100%",borderColor:"#ef444466",color:"#ef4444"}),onClick:function(){
+          if(!window.confirm("確定要清除所有資料嗎？此操作無法復原。"))return;
+          setSessions({});setPlans({});setBody({});
+          ["wt7_s","wt7_p","wt7_b"].forEach(function(k){localStorage.removeItem(k);idbSet(k,{});});
+          showToast("資料已清除");
+        }},"清除所有資料")
+      )
+    );
+  }
+
+  // ── ROOT RENDER ──
+  return e("div",{style:{minHeight:"100vh",background:"#070710",color:"#f0f0f0",fontFamily:"'Noto Sans TC','PingFang TC',sans-serif",maxWidth:480,margin:"0 auto",paddingBottom:90}},
+    // Header
+    e("div",{style:{padding:"22px 20px 0",marginBottom:16}},
+      e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}},
+        e("div",null,
+          e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:10,color:"#6366f1",letterSpacing:3,marginBottom:5}},"WORKOUT TRACKER"),
+          e("div",{style:{fontSize:23,fontWeight:700}},"訓練日誌")
+        ),
+        e("div",{style:{textAlign:"right"}},
+          e("div",{style:{fontSize:10,color:"#333"}},"累計"),
+          e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:22,color:"#6366f1",fontWeight:700}},totalS,e("span",{style:{fontSize:11,color:"#444"}}," 次"))
+        )
+      ),
+      Object.keys(latestB).length>0?e("div",{style:{display:"flex",gap:6,marginTop:12,overflowX:"auto",paddingBottom:2}},
+        BM.filter(function(m){return latestB[m.key];}).map(function(m){
+          return e("div",{key:m.key,style:{background:"#0d0d1c",border:"1px solid "+m.color+"22",borderRadius:10,padding:"4px 11px",whiteSpace:"nowrap",flexShrink:0}},
+            e("span",{style:{fontSize:10,color:"#444"}},m.label+" "),
+            e("span",{style:{fontFamily:"'Space Mono',monospace",fontSize:13,color:m.color,fontWeight:700}},latestB[m.key]+m.unit)
+          );
+        })
+      ):null
+    ),
+    // Tab buttons
+    e("div",{style:{display:"flex",gap:4,padding:"0 20px",marginBottom:18}},
+      [["log","📝","紀錄"],["cal","📅","日曆"],["stats","📊","統計"],["body","🧬","身體"],["set","⚙️","設定"]].map(function(arr){
+        var k=arr[0],ic=arr[1],lb=arr[2];
+        return e("button",{key:k,onClick:function(){setTab(k);},style:{flex:1,padding:"7px 0",borderRadius:12,cursor:"pointer",fontFamily:"inherit",fontSize:10,fontWeight:tab===k?700:400,background:tab===k?"linear-gradient(135deg,#6366f1,#8b5cf6)":"#0d0d1c",color:tab===k?"#fff":"#555",border:tab===k?"none":"1px solid #161628"}},ic,e("br"),lb);
+      })
+    ),
+    // Content area
+    e("div",{style:{padding:"0 20px"}},
+      tab==="log"?e(LogTab):null,
+      tab==="cal"?e(CalTab):null,
+      tab==="stats"?e(StatsTab):null,
+      tab==="body"?e(BodyTab):null,
+      tab==="set"?e(SettingsTab):null
+    ),
+    // Bottom nav
+    e("div",{className:"tabbar"},
+      [["log","📝","紀錄"],["cal","📅","日曆"],["stats","📊","統計"],["body","🧬","身體"],["set","⚙️","設定"]].map(function(arr){
+        var k=arr[0],ic=arr[1],lb=arr[2];
+        return e("button",{key:k,className:"tabn",onClick:function(){setTab(k);},style:{color:tab===k?"#6366f1":"#2a2a4a"}},
+          e("span",{style:{fontSize:19}},ic),
+          e("span",{style:{fontWeight:tab===k?700:400}},lb)
+        );
+      })
+    ),
+    toast?e("div",{className:"toast-el"},toast):null
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+})();
+</script>
 </body>
 </html>
-<script>
-document.getElementById("app").innerHTML = "HTML 正常載入 ✅";
-</script>
