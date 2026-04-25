@@ -1,5 +1,3 @@
-alert("app.js start");
-console.log("Storage =", typeof Storage);
 (function(){
 
 function today(){
