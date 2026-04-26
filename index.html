@@ -30,56 +30,50 @@ details summary{list-style:none;cursor:pointer;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script>
 (function(){
-const{useState,useEffect,useRef,useCallback}=React;
+const{useState,useEffect,useRef}=React;
 
-// ── IME-safe text input ──
-// Wraps an input so that onChange only fires after composition ends (fixes 注音/倉頡).
-// Also keeps a local display value so number inputs don't blur mid-typing.
+// ── IME-safe input components (must be at module top level, never inside another component) ──
 function NumInput(props){
   var value=props.value,onCommit=props.onCommit,style=props.style,placeholder=props.placeholder,inputMode=props.inputMode;
-  var local_s=useState(value);
-  var local=local_s[0],setLocal=local_s[1];
+  var ls=useState(value==null?"":String(value));
+  var local=ls[0],setLocal=ls[1];
   var composing=useRef(false);
-  // Sync when external value changes (e.g. bulk-set updates all sets)
-  useEffect(function(){if(!composing.current)setLocal(value==null?"":value);},[value]);
+  useEffect(function(){if(!composing.current)setLocal(value==null?"":String(value));},[value]);
   return React.createElement("input",{
-    type:"text",
-    inputMode:inputMode||"decimal",
-    placeholder:placeholder,
-    value:local,
-    style:style,
+    type:"text",inputMode:inputMode||"decimal",placeholder:placeholder,value:local,style:style,
     onCompositionStart:function(){composing.current=true;},
     onCompositionEnd:function(ev){composing.current=false;setLocal(ev.target.value);onCommit(ev.target.value);},
-    onChange:function(ev){
-      setLocal(ev.target.value);
-      if(!composing.current)onCommit(ev.target.value);
-    },
-    onBlur:function(ev){
-      if(!composing.current)onCommit(ev.target.value);
-    }
+    onChange:function(ev){setLocal(ev.target.value);if(!composing.current)onCommit(ev.target.value);},
+    onBlur:function(ev){composing.current=false;onCommit(ev.target.value);}
   });
 }
-
 function TextInput(props){
   var value=props.value,onCommit=props.onCommit,style=props.style,placeholder=props.placeholder,autoFocus=props.autoFocus,onKeyDown=props.onKeyDown;
-  var local_s=useState(value);
-  var local=local_s[0],setLocal=local_s[1];
+  var ls=useState(value==null?"":String(value));
+  var local=ls[0],setLocal=ls[1];
   var composing=useRef(false);
-  useEffect(function(){if(!composing.current)setLocal(value==null?"":value);},[value]);
+  useEffect(function(){if(!composing.current)setLocal(value==null?"":String(value));},[value]);
   return React.createElement("input",{
-    type:"text",
-    placeholder:placeholder,
-    value:local,
-    style:style,
-    autoFocus:autoFocus,
+    type:"text",placeholder:placeholder,value:local,style:style,autoFocus:autoFocus,
     onCompositionStart:function(){composing.current=true;},
     onCompositionEnd:function(ev){composing.current=false;setLocal(ev.target.value);onCommit(ev.target.value);},
-    onChange:function(ev){
-      setLocal(ev.target.value);
-      if(!composing.current)onCommit(ev.target.value);
-    },
-    onBlur:function(ev){if(!composing.current)onCommit(ev.target.value);},
+    onChange:function(ev){setLocal(ev.target.value);if(!composing.current)onCommit(ev.target.value);},
+    onBlur:function(ev){composing.current=false;onCommit(ev.target.value);},
     onKeyDown:onKeyDown
+  });
+}
+function NoteArea(props){
+  var value=props.value,onCommit=props.onCommit,style=props.style;
+  var ls=useState(value==null?"":String(value));
+  var local=ls[0],setLocal=ls[1];
+  var composing=useRef(false);
+  useEffect(function(){if(!composing.current)setLocal(value==null?"":String(value));},[value]);
+  return React.createElement("textarea",{
+    rows:3,placeholder:"記錄今天的感受、突破或心得...",value:local,style:style,
+    onCompositionStart:function(){composing.current=true;},
+    onCompositionEnd:function(ev){composing.current=false;setLocal(ev.target.value);onCommit(ev.target.value);},
+    onChange:function(ev){setLocal(ev.target.value);if(!composing.current)onCommit(ev.target.value);},
+    onBlur:function(ev){composing.current=false;onCommit(ev.target.value);}
   });
 }
 const MG=["胸","背","肩","二頭","三頭","核心","腿","臀"];
@@ -271,11 +265,23 @@ function App(){
     sGet("wt7_b").then(function(v){if(v)setBody(v);});
   },[]);
 
-  // Sync body input
+  // Sync body input - use current date entry if exists, otherwise load most recent past entry
   useEffect(function(){
     var entry=body[bDate];
-    if(entry){setBInput({weight:entry.weight||"",bodyfat:entry.bodyfat||"",muscle:entry.muscle||"",height:entry.height||""});}
-    else{setBInput({weight:"",bodyfat:"",muscle:"",height:""});}
+    if(entry){
+      setBInput({weight:entry.weight||"",bodyfat:entry.bodyfat||"",muscle:entry.muscle||"",height:entry.height||""});
+    } else {
+      // Find most recent entry before bDate
+      var past=Object.entries(body)
+        .filter(function(kv){return kv[0]<bDate;})
+        .sort(function(a,b){return b[0].localeCompare(a[0]);});
+      if(past.length>0){
+        var prev=past[0][1];
+        setBInput({weight:prev.weight||"",bodyfat:prev.bodyfat||"",muscle:prev.muscle||"",height:prev.height||""});
+      } else {
+        setBInput({weight:"",bodyfat:"",muscle:"",height:""});
+      }
+    }
   },[bDate,body]);
 
   function showToast(msg){setToast(msg);setTimeout(function(){setToast("");},2200);}
@@ -444,7 +450,6 @@ function App(){
     var totalVol=calcVol(curEx);
     var totalSets=curEx.reduce(function(s,ex){return s+ex.sets.length;},0);
     return e("div",null,
-      // Date selector
       e("div",{style:Object.assign({},CARD,{display:"flex",gap:12,alignItems:"center",padding:"12px 16px"})},
         e("span",{style:{fontSize:20}},"📅"),
         e("div",{style:{flex:1}},
@@ -453,7 +458,6 @@ function App(){
         ),
         editDate===today?e("span",{style:{fontSize:10,background:"#14143a",color:"#6366f1",padding:"3px 9px",borderRadius:6}},"今天"):null
       ),
-      // Exercise cards
       curEx.map(function(ex,xi){
         var s0=ex.sets[0]||{};
         var exVol=ex.sets.reduce(function(s,st){return s+(parseFloat(st.weight)||0)*(parseFloat(st.reps)||0);},0);
@@ -493,16 +497,15 @@ function App(){
               ex.sets.map(function(s,si){
                 return e("div",{key:si,style:{display:"grid",gridTemplateColumns:"18px 1fr 1fr 1fr",gap:5,marginBottom:5,alignItems:"center"}},
                   e("span",{style:{fontSize:10,color:"#444",textAlign:"center"}},"S"+(si+1)),
-                  e(NumInput,{inputMode:"decimal",placeholder:"kg",value:s.weight||"",onCommit:function(ev){updateIndivSet(xi,si,"weight",ev);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
-                  e(NumInput,{inputMode:"numeric",placeholder:"次",value:s.reps||"",onCommit:function(ev){updateIndivSet(xi,si,"reps",ev);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
-                  e(NumInput,{inputMode:"numeric",placeholder:"秒",value:s.rest||"",onCommit:function(ev){updateIndivSet(xi,si,"rest",ev);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})})
+                  e(NumInput,{inputMode:"decimal",placeholder:"kg",value:s.weight||"",onCommit:function(v){updateIndivSet(xi,si,"weight",v);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
+                  e(NumInput,{inputMode:"numeric",placeholder:"次",value:s.reps||"",onCommit:function(v){updateIndivSet(xi,si,"reps",v);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
+                  e(NumInput,{inputMode:"numeric",placeholder:"秒",value:s.rest||"",onCommit:function(v){updateIndivSet(xi,si,"rest",v);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})})
                 );
               })
             )
           ):null
         );
       }),
-      // Session total
       curEx.length>0&&totalVol>0?e("div",{style:Object.assign({},CARD,{background:"#0d0d20",border:"1px solid #6366f133",padding:"13px 16px"})},
         e("div",{style:{fontSize:10,color:"#555",letterSpacing:1,marginBottom:8}},"本次訓練總量"),
         e("div",{style:{display:"flex"}},
@@ -513,7 +516,6 @@ function App(){
           e("div",{style:{flex:1,textAlign:"center"}},e("div",{style:{fontFamily:"'Space Mono',monospace",fontSize:20,fontWeight:700,color:"#06b6d4"}},totalSets),e("div",{style:{fontSize:10,color:"#555",marginTop:3}},"總組數"))
         )
       ):null,
-      // Add exercise
       showAdd?e("div",{style:Object.assign({},CARD,{border:"1px solid #6366f133"})},
         e("div",{style:{fontWeight:700,fontSize:14,color:"#8b8cf8",marginBottom:14}},"＋ 新增訓練動作"),
         e(TextInput,{placeholder:"動作名稱（例：臥推、深蹲）",value:newEx.name,onCommit:function(v){setNewEx(function(p){return Object.assign({},p,{name:v});});},onKeyDown:function(ev){if(ev.key==="Enter")addExercise();},style:Object.assign({},FIELD,{marginBottom:10}),autoFocus:true}),
@@ -540,18 +542,7 @@ function App(){
       ):e("button",{style:Object.assign({},BTNG,{width:"100%",padding:13,fontSize:14,marginBottom:12,borderStyle:"dashed",borderColor:"#1c1c30"}),onClick:function(){setShowAdd(true);}},"＋ 新增訓練動作"),
       e("div",{style:CARD},
         e("div",{style:{fontSize:11,color:"#444",marginBottom:8}},"💭 備註 / 訓練感受"),
-        React.createElement(function NoteArea(){
-          var composing=useRef(false);
-          var local_s=useState(curNote);
-          var local=local_s[0],setLocal=local_s[1];
-          useEffect(function(){if(!composing.current)setLocal(curNote);},[curNote]);
-          return React.createElement("textarea",{rows:3,placeholder:"記錄今天的感受、突破或心得...",value:local,style:Object.assign({},FIELD,{resize:"none",lineHeight:1.7}),
-            onCompositionStart:function(){composing.current=true;},
-            onCompositionEnd:function(ev){composing.current=false;setLocal(ev.target.value);updateNote(ev.target.value);},
-            onChange:function(ev){setLocal(ev.target.value);if(!composing.current)updateNote(ev.target.value);},
-            onBlur:function(ev){if(!composing.current)updateNote(ev.target.value);}
-          });
-        })
+        e(NoteArea,{value:curNote,onCommit:updateNote,style:Object.assign({},FIELD,{resize:"none",lineHeight:1.7})})
       ),
       e("button",{style:BTNP,onClick:function(){sSet("wt7_s",sessions);showToast("訓練已儲存 ✓");}},"💾 儲存本次訓練")
     );
@@ -667,7 +658,7 @@ function App(){
           BM.map(function(m){
             return e("div",{key:m.key},
               e("div",{style:{fontSize:11,color:m.color,marginBottom:5,fontWeight:600}},m.label+" ("+m.unit+")"),
-              e(NumInput,{inputMode:"decimal",placeholder:"輸入"+m.label,value:bInput[m.key]||"",onCommit:function(v){setBInput(function(p){var n={};Object.assign(n,p);n[m.key]=v;return n;});},style:FIELD})
+              e(NumInput,{inputMode:"decimal",placeholder:"輸入"+m.label,value:bInput[m.key]||"",onCommit:function(v){var k=m.key;setBInput(function(p){var n={};Object.assign(n,p);n[k]=v;return n;});},style:FIELD})
             );
           })
         ),
@@ -791,11 +782,11 @@ function App(){
     ),
     // Content area
     e("div",{style:{padding:"0 20px"}},
-      tab==="log"?e(LogTab):null,
-      tab==="cal"?e(CalTab):null,
-      tab==="stats"?e(StatsTab):null,
-      tab==="body"?e(BodyTab):null,
-      tab==="set"?e(SettingsTab):null
+      tab==="log"?LogTab():null,
+      tab==="cal"?CalTab():null,
+      tab==="stats"?StatsTab():null,
+      tab==="body"?BodyTab():null,
+      tab==="set"?SettingsTab():null
     ),
     // Bottom nav
     e("div",{className:"tabbar"},
