@@ -30,7 +30,58 @@ details summary{list-style:none;cursor:pointer;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script>
 (function(){
-const{useState,useEffect}=React;
+const{useState,useEffect,useRef,useCallback}=React;
+
+// ── IME-safe text input ──
+// Wraps an input so that onChange only fires after composition ends (fixes 注音/倉頡).
+// Also keeps a local display value so number inputs don't blur mid-typing.
+function NumInput(props){
+  var value=props.value,onCommit=props.onCommit,style=props.style,placeholder=props.placeholder,inputMode=props.inputMode;
+  var local_s=useState(value);
+  var local=local_s[0],setLocal=local_s[1];
+  var composing=useRef(false);
+  // Sync when external value changes (e.g. bulk-set updates all sets)
+  useEffect(function(){if(!composing.current)setLocal(value==null?"":value);},[value]);
+  return React.createElement("input",{
+    type:"text",
+    inputMode:inputMode||"decimal",
+    placeholder:placeholder,
+    value:local,
+    style:style,
+    onCompositionStart:function(){composing.current=true;},
+    onCompositionEnd:function(ev){composing.current=false;setLocal(ev.target.value);onCommit(ev.target.value);},
+    onChange:function(ev){
+      setLocal(ev.target.value);
+      if(!composing.current)onCommit(ev.target.value);
+    },
+    onBlur:function(ev){
+      if(!composing.current)onCommit(ev.target.value);
+    }
+  });
+}
+
+function TextInput(props){
+  var value=props.value,onCommit=props.onCommit,style=props.style,placeholder=props.placeholder,autoFocus=props.autoFocus,onKeyDown=props.onKeyDown;
+  var local_s=useState(value);
+  var local=local_s[0],setLocal=local_s[1];
+  var composing=useRef(false);
+  useEffect(function(){if(!composing.current)setLocal(value==null?"":value);},[value]);
+  return React.createElement("input",{
+    type:"text",
+    placeholder:placeholder,
+    value:local,
+    style:style,
+    autoFocus:autoFocus,
+    onCompositionStart:function(){composing.current=true;},
+    onCompositionEnd:function(ev){composing.current=false;setLocal(ev.target.value);onCommit(ev.target.value);},
+    onChange:function(ev){
+      setLocal(ev.target.value);
+      if(!composing.current)onCommit(ev.target.value);
+    },
+    onBlur:function(ev){if(!composing.current)onCommit(ev.target.value);},
+    onKeyDown:onKeyDown
+  });
+}
 const MG=["胸","背","肩","二頭","三頭","核心","腿","臀"];
 const MC={"胸":"#ef4444","背":"#f97316","肩":"#eab308","二頭":"#22c55e","三頭":"#06b6d4","核心":"#8b5cf6","腿":"#ec4899","臀":"#f59e0b"};
 const BM=[
@@ -426,14 +477,14 @@ function App(){
             ["重量(kg)","次數","組數","組間(s)"].map(function(h){return e("div",{key:h,style:{fontSize:10,color:"#333",textAlign:"center"}},h);})
           ),
           e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 76px 1fr",gap:6,alignItems:"center"}},
-            e("input",{type:"number",inputMode:"decimal",placeholder:"0",value:s0.weight||"",onChange:function(ev){bulkSet(xi,"weight",ev.target.value);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})}),
-            e("input",{type:"number",inputMode:"numeric",placeholder:"0",value:s0.reps||"",onChange:function(ev){bulkSet(xi,"reps",ev.target.value);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})}),
+            e(NumInput,{inputMode:"decimal",placeholder:"0",value:s0.weight||"",onCommit:function(v){bulkSet(xi,"weight",v);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})}),
+            e(NumInput,{inputMode:"numeric",placeholder:"0",value:s0.reps||"",onCommit:function(v){bulkSet(xi,"reps",v);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})}),
             e("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",gap:4}},
               e("button",{onClick:function(){changeSetCount(xi,-1);},style:{background:"#111128",border:"1px solid #1c1c30",color:"#aaa",borderRadius:7,width:24,height:30,cursor:"pointer",fontSize:15}},"−"),
               e("span",{style:{fontFamily:"'Space Mono',monospace",fontSize:15,fontWeight:700,color:"#8b8cf8",minWidth:14,textAlign:"center"}},ex.sets.length),
               e("button",{onClick:function(){changeSetCount(xi,1);},style:{background:"#111128",border:"1px solid #1c1c30",color:"#aaa",borderRadius:7,width:24,height:30,cursor:"pointer",fontSize:15}},"＋")
             ),
-            e("input",{type:"number",inputMode:"numeric",placeholder:"60",value:s0.rest||"",onChange:function(ev){bulkSet(xi,"rest",ev.target.value);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})})
+            e(NumInput,{inputMode:"numeric",placeholder:"60",value:s0.rest||"",onCommit:function(v){bulkSet(xi,"rest",v);},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})})
           ),
           exVol>0?e("div",{style:{marginTop:8,display:"flex",justifyContent:"flex-end"}},e("span",{style:{fontSize:11,color:"#6366f1",background:"#6366f115",border:"1px solid #6366f133",borderRadius:8,padding:"3px 10px"}},"總量 "+exVol.toLocaleString()+" kg")):null,
           ex.sets.length>1?e("details",{style:{marginTop:6}},
@@ -442,9 +493,9 @@ function App(){
               ex.sets.map(function(s,si){
                 return e("div",{key:si,style:{display:"grid",gridTemplateColumns:"18px 1fr 1fr 1fr",gap:5,marginBottom:5,alignItems:"center"}},
                   e("span",{style:{fontSize:10,color:"#444",textAlign:"center"}},"S"+(si+1)),
-                  e("input",{type:"number",inputMode:"decimal",placeholder:"kg",value:s.weight||"",onChange:function(ev){updateIndivSet(xi,si,"weight",ev.target.value);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
-                  e("input",{type:"number",inputMode:"numeric",placeholder:"次",value:s.reps||"",onChange:function(ev){updateIndivSet(xi,si,"reps",ev.target.value);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
-                  e("input",{type:"number",inputMode:"numeric",placeholder:"秒",value:s.rest||"",onChange:function(ev){updateIndivSet(xi,si,"rest",ev.target.value);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})})
+                  e(NumInput,{inputMode:"decimal",placeholder:"kg",value:s.weight||"",onCommit:function(ev){updateIndivSet(xi,si,"weight",ev);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
+                  e(NumInput,{inputMode:"numeric",placeholder:"次",value:s.reps||"",onCommit:function(ev){updateIndivSet(xi,si,"reps",ev);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})}),
+                  e(NumInput,{inputMode:"numeric",placeholder:"秒",value:s.rest||"",onCommit:function(ev){updateIndivSet(xi,si,"rest",ev);},style:Object.assign({},FIELD,{padding:"7px 4px",textAlign:"center",fontSize:13})})
                 );
               })
             )
@@ -465,7 +516,7 @@ function App(){
       // Add exercise
       showAdd?e("div",{style:Object.assign({},CARD,{border:"1px solid #6366f133"})},
         e("div",{style:{fontWeight:700,fontSize:14,color:"#8b8cf8",marginBottom:14}},"＋ 新增訓練動作"),
-        e("input",{placeholder:"動作名稱（例：臥推、深蹲）",value:newEx.name,onChange:function(ev){setNewEx(function(p){return Object.assign({},p,{name:ev.target.value});});},onKeyDown:function(ev){if(ev.key==="Enter")addExercise();},style:Object.assign({},FIELD,{marginBottom:10}),autoFocus:true}),
+        e(TextInput,{placeholder:"動作名稱（例：臥推、深蹲）",value:newEx.name,onCommit:function(v){setNewEx(function(p){return Object.assign({},p,{name:v});});},onKeyDown:function(ev){if(ev.key==="Enter")addExercise();},style:Object.assign({},FIELD,{marginBottom:10}),autoFocus:true}),
         e("div",{style:{fontSize:11,color:"#444",marginBottom:7}},"目標肌群"),
         e("div",{style:{display:"flex",flexWrap:"wrap",gap:7,marginBottom:14}},
           MG.map(function(m){
@@ -478,7 +529,7 @@ function App(){
             var lb=arr[0],fk=arr[1],mode=arr[2];
             return e("div",{key:fk},
               e("div",{style:{fontSize:10,color:"#444",marginBottom:4,textAlign:"center"}},lb),
-              e("input",{type:"number",inputMode:mode,placeholder:fk==="sets"?"4":fk==="rest"?"60":"0",value:newEx[fk],onChange:function(ev){var v=ev.target.value;setNewEx(function(p){var n={};Object.assign(n,p);n[fk]=v;return n;});},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})})
+              e(NumInput,{inputMode:mode,placeholder:fk==="sets"?"4":fk==="rest"?"60":"0",value:newEx[fk],onCommit:function(v){setNewEx(function(p){var n={};Object.assign(n,p);n[fk]=v;return n;});},style:Object.assign({},FIELD,{padding:"8px 4px",textAlign:"center"})})
             );
           })
         ),
@@ -489,7 +540,18 @@ function App(){
       ):e("button",{style:Object.assign({},BTNG,{width:"100%",padding:13,fontSize:14,marginBottom:12,borderStyle:"dashed",borderColor:"#1c1c30"}),onClick:function(){setShowAdd(true);}},"＋ 新增訓練動作"),
       e("div",{style:CARD},
         e("div",{style:{fontSize:11,color:"#444",marginBottom:8}},"💭 備註 / 訓練感受"),
-        e("textarea",{rows:3,placeholder:"記錄今天的感受、突破或心得...",value:curNote,onChange:function(ev){updateNote(ev.target.value);},style:Object.assign({},FIELD,{resize:"none",lineHeight:1.7})})
+        React.createElement(function NoteArea(){
+          var composing=useRef(false);
+          var local_s=useState(curNote);
+          var local=local_s[0],setLocal=local_s[1];
+          useEffect(function(){if(!composing.current)setLocal(curNote);},[curNote]);
+          return React.createElement("textarea",{rows:3,placeholder:"記錄今天的感受、突破或心得...",value:local,style:Object.assign({},FIELD,{resize:"none",lineHeight:1.7}),
+            onCompositionStart:function(){composing.current=true;},
+            onCompositionEnd:function(ev){composing.current=false;setLocal(ev.target.value);updateNote(ev.target.value);},
+            onChange:function(ev){setLocal(ev.target.value);if(!composing.current)updateNote(ev.target.value);},
+            onBlur:function(ev){if(!composing.current)updateNote(ev.target.value);}
+          });
+        })
       ),
       e("button",{style:BTNP,onClick:function(){sSet("wt7_s",sessions);showToast("訓練已儲存 ✓");}},"💾 儲存本次訓練")
     );
@@ -605,7 +667,7 @@ function App(){
           BM.map(function(m){
             return e("div",{key:m.key},
               e("div",{style:{fontSize:11,color:m.color,marginBottom:5,fontWeight:600}},m.label+" ("+m.unit+")"),
-              e("input",{type:"number",inputMode:"decimal",placeholder:"輸入"+m.label,value:bInput[m.key]||"",onChange:function(ev){var v=ev.target.value;setBInput(function(p){var n={};Object.assign(n,p);n[m.key]=v;return n;});},style:FIELD})
+              e(NumInput,{inputMode:"decimal",placeholder:"輸入"+m.label,value:bInput[m.key]||"",onCommit:function(v){setBInput(function(p){var n={};Object.assign(n,p);n[m.key]=v;return n;});},style:FIELD})
             );
           })
         ),
